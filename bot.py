@@ -39,10 +39,36 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 # ─── Логирование ──────────────────────────────────────────────────────────────
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    level=logging.INFO,
+# Создаём директорию для логов, если её нет
+LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, "bot.log")
+
+# Конфигурируем логирование: в консоль и в файл
+log_format = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+log_formatter = logging.Formatter(log_format)
+
+# Логирование в консоль
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(log_formatter)
+
+# Логирование в файл (с ротацией по размеру)
+from logging.handlers import RotatingFileHandler
+file_handler = RotatingFileHandler(
+    LOG_FILE,
+    maxBytes=5 * 1024 * 1024,  # 5 MB
+    backupCount=5,              # Хранить 5 старых файлов
 )
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(log_formatter)
+
+# Применяем обработчики к корневому логгеру
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.DEBUG)
+root_logger.addHandler(console_handler)
+root_logger.addHandler(file_handler)
+
 logger = logging.getLogger(__name__)
 
 # ─── Состояния ConversationHandler ────────────────────────────────────────────
