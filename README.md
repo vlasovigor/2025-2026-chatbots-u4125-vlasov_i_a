@@ -109,6 +109,232 @@ python bot.py
 
 ---
 
+## 🐳 Docker (запуск на удаленном сервере)
+
+### Требования
+
+- Docker 20.10+
+- Docker Compose 2.0+ (или `docker compose` ��строенный в Docker Desktop)
+
+### Установка Docker и Docker Compose
+
+#### macOS
+
+```bash
+# Установить Docker Desktop (включает Docker и Docker Compose)
+brew install --cask docker
+
+# Или скачать с https://www.docker.com/products/docker-desktop
+```
+
+#### Linux (Ubuntu/Debian)
+
+```bash
+# Установить Docker
+sudo apt-get update
+sudo apt-get install docker.io docker-compose
+
+# Добавить текущего пользователя в группу docker
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+#### Windows
+
+Скачайте [Docker Desktop для Windows](https://www.docker.com/products/docker-desktop)
+
+### Проверка установки
+
+```bash
+docker --version
+docker compose version
+# или
+docker-compose --version
+```
+
+### Быстрый старт с Docker Compose
+
+#### 1. Создать файл `.env`
+
+```bash
+cp .env.example .env
+```
+
+Отредактируйте `.env` и добавьте ваш токен:
+
+```
+BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ
+```
+
+#### 2. Запустить бота
+
+```bash
+docker-compose up -d
+```
+
+#### 3. Проверить статус
+
+```bash
+docker-compose ps
+docker-compose logs -f finance-bot
+```
+
+#### 4. Остановить бота
+
+```bash
+docker-compose down
+```
+
+### Сборка и запуск вручную
+
+#### Сборка образа
+
+```bash
+docker build -t finance-bot:latest .
+```
+
+#### Запуск контейнера
+
+```bash
+docker run -d \
+  --name finance-bot \
+  --restart unless-stopped \
+  -e BOT_TOKEN=<ваш-токен> \
+  -v $(pwd)/finance_bot.db:/app/finance_bot.db \
+  -v $(pwd)/logs:/app/logs \
+  finance-bot:latest
+```
+
+#### Просмотр логов
+
+```bash
+docker logs -f finance-bot
+```
+
+#### Остановка контейнера
+
+```bash
+docker stop finance-bot
+docker rm finance-bot
+```
+
+### Развертывание на удаленном сервере
+
+#### Способ 1: Автоматическое развертывание (рекомендуется)
+
+Используйте скрипт `deploy.sh` для автоматического развертывания:
+
+```bash
+# Сделать скрипт исполняемым
+chmod +x deploy.sh
+
+# Запустить развертывание
+./deploy.sh <server-ip> <bot-token> [username]
+
+# Пример:
+./deploy.sh 192.168.1.100 1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ root
+```
+
+Скрипт автоматически:
+- Создаст необходимые директории на сервере
+- Скопирует все файлы проекта
+- Создаст `.env` файл с токеном
+- Запустит контейнер в продакшене
+- Покажет статус и логи
+
+#### Способ 2: Ручное развертывание
+
+##### 1. Подключиться к серверу
+
+```bash
+ssh user@your-server.com
+```
+
+##### 2. Клонировать репозиторий
+
+```bash
+git clone <url-репозитория>
+cd <папка-проекта>
+```
+
+##### 3. Создать `.env` файл
+
+```bash
+nano .env
+```
+
+Добавьте:
+
+```
+BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ
+```
+
+##### 4. Запустить с Docker Compose (продакшн конфигурация)
+
+```bash
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+##### 5. Проверить статус
+
+```bash
+docker-compose -f docker-compose.prod.yml ps
+docker-compose -f docker-compose.prod.yml logs -f finance-bot
+```
+
+### Конфигурации Docker Compose
+
+| Файл | Назначение |
+|---|---|
+| `docker-compose.yml` | Локальная разработка |
+| `docker-compose.prod.yml` | Продакшн на удаленном сервере |
+
+**Различия:**
+- `prod` версия использует `restart: always` (всегда перезагружать)
+- Более строгие ограничения ресурсов
+- Более частые проверки здоровья
+- Больший размер логов (50 MB вместо 10 MB)
+- Пути к томам на хосте: `/data/finance-bot/`
+
+### Полезные команды
+
+| Команда | Описание |
+|---|---|
+| `docker-compose up -d` | Запустить в фоне |
+| `docker-compose down` | Остановить и удалить контейнеры |
+| `docker-compose logs -f` | Просмотр логов в реальном времени |
+| `docker-compose restart` | Перезагрузить контейнер |
+| `docker-compose exec finance-bot bash` | Войти в контейнер |
+| `docker ps` | Список запущенных контейнеров |
+| `docker images` | Список образов |
+
+### Структура томов
+
+```
+.
+├── finance_bot.db    # База данных (сохраняется между перезагрузками)
+├── logs/             # Логи приложения
+└── data/             # Дополнительные данные
+```
+
+### Переменные окружения в Docker
+
+| Переменная | Значение | Описание |
+|---|---|---|
+| `BOT_TOKEN` | `<ваш-токен>` | Токен бота (обязательно) |
+| `PYTHONUNBUFFERED` | `1` | Вывод логов в реальном времени |
+
+### Проверка здоровья контейнера
+
+Docker Compose автоматически проверяет здоровье контейнера каждые 30 секунд. Если контейнер не отвечает, он будет перезагружен.
+
+```bash
+docker-compose ps
+# STATUS: Up X seconds (healthy)
+```
+
+---
+
 ## ⚙️ Конфигурация
 
 Все настройки хранятся в файле `.env`:

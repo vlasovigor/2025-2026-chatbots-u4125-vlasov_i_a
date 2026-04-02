@@ -1,0 +1,68 @@
+version: '3.8'
+
+# Продакшн конфигурация для удаленного сервера
+# Использование: docker-compose -f docker-compose.prod.yml up -d
+
+services:
+  finance-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: finance-bot-prod
+    restart: always  # Всегда перезагружать контейнер
+    
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - PYTHONUNBUFFERED=1
+    
+    volumes:
+      # Сохранение данных на хосте
+      - /data/finance-bot/db:/app/finance_bot.db
+      - /data/finance-bot/logs:/app/logs
+      - /data/finance-bot/data:/app/data
+    
+    # Более строгие ограничения ресурсов для продакшена
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '1'
+          memory: 512M
+    
+    # Проверка здоровья
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/app/finance_bot.db') else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    
+    # Логирование в файл
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
+        labels: "service=finance-bot"
+    
+    networks:
+      - finance-bot-network
+    
+    # Безопасность
+    security_opt:
+      - no-new-privileges:true
+    
+    # Переменные для отладки (закомментировать в продакшене)
+    # stdin_open: true
+    # tty: true
+
+networks:
+  finance-bot-network:
+    driver: bridge
+
+volumes:
+  bot-data:
+    driver: local
