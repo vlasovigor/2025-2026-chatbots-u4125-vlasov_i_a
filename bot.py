@@ -54,6 +54,8 @@ TOPIC_SELECT = 1
 IN_QUIZ = 2
 # Просмотр результатов
 RESULTS_VIEW = 3
+# Подтверждение прерывания теста
+CONFIRM_QUIT = 4
 
 # ─── Константы ────────────────────────────────────────────────────────────────
 GENERAL_QUIZ_SIZE = 10   # Вопросов в общем тесте
@@ -213,7 +215,61 @@ def init_quiz_state(
         "wrong_answers": [],      # список ошибок для разбора
         "topic_stats": {},        # {topic_key: [correct, total]}
         "answered": False,        # флаг: пользователь уже ответил на текущий вопрос
+        "all_answers": [],        # список всех ответов: {question, chosen, is_correct}
     }
+
+
+def format_full_review(all_answers: list[dict]) -> list[str]:
+    """
+    Формирует список сообщений с полным разбором теста.
+    Возвращает список строк (разбито на части, т.к. Telegram ограничивает длину сообщения).
+    """
+    labels = ["А", "Б", "В", "Г"]
+    parts = []
+    current_part = ["📋 *Полный ра��бор теста*\n"]
+
+    for i, item in enumerate(all_answers, 1):
+        q = item["question"]
+        chosen = item["chosen"]
+        correct_idx = q["correct"]
+        is_correct = item["is_correct"]
+        topic_label = TOPICS.get(q["topic"], q["topic"])
+
+        icon = "✅" if is_correct else "❌"
+
+        block_lines = [
+            f"\n{icon} *Вопрос {i}* — {topic_label}",
+            f"_{q['text']}_",
+        ]
+
+        # Все варианты ответа с пометками
+        for j, opt in enumerate(q["options"]):
+            if j == correct_idx and j == chosen:
+                marker = "✅"  # пр��вильный и выбранный
+            elif j == correct_idx:
+                marker = "☑️"  # правильный, но не выбранный
+            elif j == chosen:
+                marker = "❌"  # выбранный, но неправильный
+            else:
+                marker = "▫️"  # не выбранный и неправильный
+            block_lines.append(f"  {marker} *{labels[j]}*. {opt}")
+
+        if not is_correct:
+            block_lines.append(f"  💡 _{q['explanation']}_")
+
+        block = "\n".join(block_lines)
+
+        # Telegram ограничивает сообщение ~4096 символами — разбиваем на части
+        if len("\n".join(current_part)) + len(block) > 3800:
+            parts.append("\n".join(current_part))
+            current_part = [block]
+        else:
+            current_part.append(block)
+
+    if current_part:
+        parts.append("\n".join(current_part))
+
+    return parts
 
 
 # ─── Обработчики команд ───────────────────────────────────────────────────────
@@ -390,7 +446,11 @@ async def send_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     total = len(quiz["questions"])
 
     text = format_question_text(question, idx + 1, total)
-    keyboard = build_answer_keyboard(question, idx)
+    
+    # Добавляем кнопку прерывания теста
+    buttons = list(build_answer_keyboard(question, idx).inline_keyboard[0])
+    buttons.append(InlineKeyboardButton("⏹️ Прервать", callback_data="confirm_quit"))
+    keyboard = InlineKeyboardMarkup([buttons])
 
     # Отправляем новое сообщение с вопросом
     msg = await context.bot.send_message(
@@ -451,6 +511,13 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     quiz["topic_stats"][topic_key][1] += 1
     if is_correct:
         quiz["topic_stats"][topic_key][0] += 1
+
+    # Сохраняем ответ пользователя для полного разбора
+    quiz["all_answers"].append({
+        "question": question,
+        "chosen": chosen,
+        "is_correct": is_correct,
+    })
 
     # ── Режим обучения: показываем объяснение после каждого ответа ──
     if quiz["mode"] == "learning":
@@ -545,14 +612,60 @@ async def finish_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         text=result_text,
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 Пройти ещё раз", callback_data="menu_general")],
+            [InlineKeyboardButton("📋 Все вопросы и ответы", callback_data="show_review")],
+            [InlineKeyboardButton("� Пройти ещё раз", callback_data="menu_general")],
             [InlineKeyboardButton("📚 Выбрать тему",   callback_data="menu_topic")],
             [InlineKeyboardButton("🏠 Главное меню",   callback_data="back_main")],
         ]),
     )
 
+    # Сохраняем all_answers для просмотра позже
+    context.user_data["last_quiz_answers"] = quiz["all_answers"]
+
     # Очищаем состояние теста
     context.user_data.pop("quiz", None)
+
+
+async def show_full_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Показывает полный разбор всех вопросов и ответов."""
+    query = update.callback_query
+    await query.answer()
+
+    all_answers = context.user_data.get("last_quiz_answers", [])
+    if not all_answers:
+        await query.edit_message_text(
+            "⚠️ Данные о тесте не найдены.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🏠 Главное меню", callback_data="back_main")]
+            ]),
+        )
+        return MAIN_MENU
+
+    # Формируем части разбора
+    parts = format_full_review(all_answers)
+
+    # Отправляем каждую часть отдельным сообщением
+    for i, part in enumerate(parts):
+        is_last = i == len(parts) - 1
+        if is_last:
+            # На последней части добавляем кнопки меню
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=part,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔄 Пройти ещё раз", callback_data="menu_general")],
+                    [InlineKeyboardButton("🏠 Главное меню",   callback_data="back_main")],
+                ]),
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=part,
+                parse_mode="Markdown",
+            )
+
+    return MAIN_MENU
 
 
 # ─── Просмотр результатов ─────────────────────────────────────────────────────
@@ -621,6 +734,77 @@ async def show_results(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
 
 
+# ─── Прерывание теста ─────────────────────────────────────────────────────────
+
+async def confirm_quit_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Показывает подтверждение прерывания теста."""
+    query = update.callback_query
+    await query.answer()
+
+    quiz = context.user_data.get("quiz")
+    if not quiz:
+        return MAIN_MENU
+
+    current = quiz["current"] + 1
+    total = len(quiz["questions"])
+
+    await query.edit_message_text(
+        f"⚠️ *Вы уверены?*\n\n"
+        f"Вы прошли {current}/{total} вопросов.\n"
+        f"Текущий результат: {quiz['score']} правильных ответов.\n\n"
+        f"Если вы прервёте тест, результат не будет сохранён.",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Да, прервать", callback_data="quit_confirmed")],
+            [InlineKeyboardButton("❌ Нет, продолжить", callback_data="quit_cancelled")],
+        ]),
+    )
+    return CONFIRM_QUIT
+
+
+async def quit_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Подтверждение прерывания теста."""
+    query = update.callback_query
+    await query.answer()
+
+    # Очищаем состояние теста
+    context.user_data.pop("quiz", None)
+
+    await query.edit_message_text(
+        "❌ Тест прерван.\n\n"
+        "Результат не был сохранён.",
+        reply_markup=build_main_menu_keyboard(),
+    )
+    return MAIN_MENU
+
+
+async def quit_cancelled(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Отмена прерывания теста."""
+    query = update.callback_query
+    await query.answer()
+
+    quiz = context.user_data.get("quiz")
+    if not quiz:
+        await query.edit_message_text(
+            "⚠️ Сессия истекла.",
+            reply_markup=build_main_menu_keyboard(),
+        )
+        return MAIN_MENU
+
+    # Возвращаемся к текущему во��росу
+    idx = quiz["current"]
+    question = quiz["questions"][idx]
+    total = len(quiz["questions"])
+
+    text = format_question_text(question, idx + 1, total)
+    buttons = list(build_answer_keyboard(question, idx).inline_keyboard[0])
+    buttons.append(InlineKeyboardButton("⏹️ Прервать", callback_data="confirm_quit"))
+    keyboard = InlineKeyboardMarkup([buttons])
+
+    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    return IN_QUIZ
+
+
 # ─── Обработчик неизвестных callback ─────────────────────────────────────────
 
 async def unknown_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -666,10 +850,16 @@ def main() -> None:
             IN_QUIZ: [
                 CallbackQueryHandler(handle_answer,        pattern="^answer_"),
                 CallbackQueryHandler(next_question_callback, pattern="^next_question$"),
+                CallbackQueryHandler(show_full_review,     pattern="^show_review$"),
+                CallbackQueryHandler(confirm_quit_quiz,    pattern="^confirm_quit$"),
                 # Кнопки «ещё раз» и «меню» доступны после завершения теста
                 CallbackQueryHandler(menu_general,  pattern="^menu_general$"),
                 CallbackQueryHandler(menu_topic,    pattern="^menu_topic$"),
                 CallbackQueryHandler(back_main,     pattern="^back_main$"),
+            ],
+            CONFIRM_QUIT: [
+                CallbackQueryHandler(quit_confirmed, pattern="^quit_confirmed$"),
+                CallbackQueryHandler(quit_cancelled, pattern="^quit_cancelled$"),
             ],
             RESULTS_VIEW: [
                 CallbackQueryHandler(back_main, pattern="^back_main$"),
