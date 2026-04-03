@@ -1,4 +1,4 @@
-version: '3.8'
+version: '3.3'
 
 # Продакшн конфигурация для удаленного сервера
 # Использование: docker-compose -f docker-compose.prod.yml up -d
@@ -13,24 +13,22 @@ services:
     
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - PYTHONUNBUFFERED=1
     
     volumes:
       # Сохранение данных на хосте
-      - /data/finance-bot/db:/app/finance_bot.db
+      - /data/finance-bot/db:/app/data
       - /data/finance-bot/logs:/app/logs
-      - /data/finance-bot/data:/app/data
     
-    # Более строгие ограничения ресурсов для продакшена
+    # Ограничения ресурсов для продакшена
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 1G
-        reservations:
-          cpus: '1'
+          cpus: '0.5'
           memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     
     # Проверка здоровья
     healthcheck:
@@ -38,7 +36,6 @@ services:
       interval: 60s
       timeout: 10s
       retries: 5
-      start_period: 60s
     
     # Логирование в файл
     logging:
