@@ -14,7 +14,10 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # Путь к файлу базы данных
-DB_PATH = os.path.join(os.path.dirname(__file__), "finance_bot.db")
+# Используем переменную окружения DATA_DIR, если она установлена (��ля Docker)
+# Иначе используем текущую директорию (для локальной разработки)
+DATA_DIR = os.getenv("DATA_DIR", os.path.dirname(__file__))
+DB_PATH = os.path.join(DATA_DIR, "finance_bot.db")
 
 
 async def init_db() -> None:

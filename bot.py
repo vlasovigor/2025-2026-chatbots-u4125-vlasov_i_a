@@ -71,6 +71,10 @@ root_logger.addHandler(file_handler)
 
 logger = logging.getLogger(__name__)
 
+# ─── Отключаем логирование httpx (чтобы не писать API ключ в логи) ──────────
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
+
 # ─── Состояния ConversationHandler ────────────────────────────────────────────
 # Главное меню
 MAIN_MENU = 0
@@ -617,6 +621,7 @@ async def finish_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     topic_stats = quiz["topic_stats"]
 
     # Сохраняем результат в БД
+    db_error = None
     try:
         await save_result(
             user_id=user.id,
@@ -628,10 +633,19 @@ async def finish_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             total=total,
         )
     except Exception as e:
-        logger.error(f"Ошибка сохранения результата: {e}")
+        logger.error(f"❌ Ошибка сохранения результата: {e}", exc_info=True)
+        db_error = str(e)
 
     # Формируем итоговое сообщение
     result_text = format_result_message(score, total, wrong_answers, topic_stats, mode)
+
+    # Добавляем предупреждение об ошибке БД, если она была
+    if db_error:
+        result_text += (
+            f"\n\n⚠️ *Внимание:* Результат не был сохранён в базу данных.\n"
+            f"Ошибка: `{db_error}`\n"
+            f"Пожалуйста, свяжитесь с администратором."
+        )
 
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -639,7 +653,7 @@ async def finish_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("📋 Все вопросы и ответы", callback_data="show_review")],
-            [InlineKeyboardButton("� Пройти ещё раз", callback_data="menu_general")],
+            [InlineKeyboardButton("🔄 Пройти ещё раз", callback_data="menu_general")],
             [InlineKeyboardButton("📚 Выбрать тему",   callback_data="menu_topic")],
             [InlineKeyboardButton("🏠 Главное меню",   callback_data="back_main")],
         ]),
@@ -850,7 +864,8 @@ def main() -> None:
     # Инициализируем базу данных (создаём таблицы, если их нет)
     import asyncio
     asyncio.get_event_loop().run_until_complete(init_db())
-    logger.info("База данных инициализирована")
+    logger.info("✅ База данных инициализирована")
+    logger.info("🤖 Бот запускается...")
 
     # Создаём приложение
     app = Application.builder().token(BOT_TOKEN).build()
